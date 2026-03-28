@@ -134,3 +134,23 @@ jobs:
           name: kubeflow-pipeline
           path: pipeline.yaml
           retention-days: 30
+
+  drift-check:
+    name: Check for model drift
+    runs-on: ubuntu-latest
+    needs: train-and-evaluate
+    env:
+      MLFLOW_TRACKING_URI: sqlite:///mlflow_ci.db
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: pip install scipy numpy pandas redis
+
+      - name: Run drift check
+        run: python pipelines/drift_detector.py
