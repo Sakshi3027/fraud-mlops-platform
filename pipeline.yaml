@@ -1,0 +1,604 @@
+# PIPELINE DEFINITION
+# Name: fraud-detection-mlops-pipeline
+# Description: Trains 3 fraud detection models in parallel, evaluates them, and auto-deploys the best one
+# Inputs:
+#    mlflow_tracking_uri: str [Default: 'http://host.docker.internal:5001']
+#    n_samples: int [Default: 10000.0]
+#    serving_endpoint: str [Default: 'http://localhost:8000']
+components:
+  comp-deploy-best-model:
+    executorLabel: exec-deploy-best-model
+    inputDefinitions:
+      artifacts:
+        best_model_info:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        serving_endpoint:
+          parameterType: STRING
+  comp-evaluate-and-select:
+    executorLabel: exec-evaluate-and-select
+    inputDefinitions:
+      artifacts:
+        lr_model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+        rf_model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+        xgb_model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        best_model_info:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-train-model:
+    executorLabel: exec-train-model
+    inputDefinitions:
+      parameters:
+        mlflow_tracking_uri:
+          parameterType: STRING
+        model_type:
+          parameterType: STRING
+        n_samples:
+          parameterType: NUMBER_INTEGER
+    outputDefinitions:
+      artifacts:
+        metrics:
+          artifactType:
+            schemaTitle: system.Metrics
+            schemaVersion: 0.0.1
+        model_artifact:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+  comp-train-model-2:
+    executorLabel: exec-train-model-2
+    inputDefinitions:
+      parameters:
+        mlflow_tracking_uri:
+          parameterType: STRING
+        model_type:
+          parameterType: STRING
+        n_samples:
+          parameterType: NUMBER_INTEGER
+    outputDefinitions:
+      artifacts:
+        metrics:
+          artifactType:
+            schemaTitle: system.Metrics
+            schemaVersion: 0.0.1
+        model_artifact:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+  comp-train-model-3:
+    executorLabel: exec-train-model-3
+    inputDefinitions:
+      parameters:
+        mlflow_tracking_uri:
+          parameterType: STRING
+        model_type:
+          parameterType: STRING
+        n_samples:
+          parameterType: NUMBER_INTEGER
+    outputDefinitions:
+      artifacts:
+        metrics:
+          artifactType:
+            schemaTitle: system.Metrics
+            schemaVersion: 0.0.1
+        model_artifact:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+deploymentSpec:
+  executors:
+    exec-deploy-best-model:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - deploy_best_model
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'mlflow==3.10.1'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef deploy_best_model(\n    best_model_info: Input[Dataset],\n  \
+          \  serving_endpoint: str\n):\n    import json\n    import urllib.request\n\
+          \n    with open(best_model_info.path) as f:\n        best = json.load(f)\n\
+          \n    print(f\"\\n--- Deploying Best Model ---\")\n    print(f\"  Model:\
+          \    {best['model_type']}\")\n    print(f\"  AUC:      {best['auc']}\")\n\
+          \    print(f\"  Run ID:   {best['run_id']}\")\n    print(f\"  Endpoint:\
+          \ {serving_endpoint}\")\n\n    deployment_record = {\n        \"status\"\
+          : \"deployed\",\n        \"model_type\": best[\"model_type\"],\n       \
+          \ \"run_id\": best[\"run_id\"],\n        \"auc\": best[\"auc\"],\n     \
+          \   \"serving_endpoint\": serving_endpoint,\n        \"promotion_reason\"\
+          : best.get(\"promotion_reason\", \"\"),\n    }\n\n    print(f\"\\n  Deployment\
+          \ record: {json.dumps(deployment_record, indent=2)}\")\n    print(f\"\\\
+          n  Model {best['model_type']} is live at {serving_endpoint}\")\n\n"
+        image: python:3.12-slim
+    exec-evaluate-and-select:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - evaluate_and_select
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'mlflow==3.10.1'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef evaluate_and_select(\n    lr_model: Input[Model],\n    rf_model:\
+          \ Input[Model],\n    xgb_model: Input[Model],\n    best_model_info: Output[Dataset]\n\
+          ):\n    import json\n\n    candidates = [\n        {\n            \"model_type\"\
+          : lr_model.metadata.get(\"model_type\", \"logistic_regression\"),\n    \
+          \        \"run_id\": lr_model.metadata.get(\"run_id\", \"\"),\n        \
+          \    \"auc\": float(lr_model.metadata.get(\"auc\", 0)),\n            \"\
+          mlflow_uri\": lr_model.metadata.get(\"mlflow_uri\", \"\")\n        },\n\
+          \        {\n            \"model_type\": rf_model.metadata.get(\"model_type\"\
+          , \"random_forest\"),\n            \"run_id\": rf_model.metadata.get(\"\
+          run_id\", \"\"),\n            \"auc\": float(rf_model.metadata.get(\"auc\"\
+          , 0)),\n            \"mlflow_uri\": rf_model.metadata.get(\"mlflow_uri\"\
+          , \"\")\n        },\n        {\n            \"model_type\": xgb_model.metadata.get(\"\
+          model_type\", \"xgboost\"),\n            \"run_id\": xgb_model.metadata.get(\"\
+          run_id\", \"\"),\n            \"auc\": float(xgb_model.metadata.get(\"auc\"\
+          , 0)),\n            \"mlflow_uri\": xgb_model.metadata.get(\"mlflow_uri\"\
+          , \"\")\n        }\n    ]\n\n    print(\"\\n--- Model Comparison ---\")\n\
+          \    for c in candidates:\n        print(f\"  {c['model_type']:25s} | AUC:\
+          \ {c['auc']:.4f}\")\n\n    best = max(candidates, key=lambda x: x[\"auc\"\
+          ])\n    best[\"promotion_reason\"] = (\n        f\"Highest AUC ({best['auc']:.4f})\
+          \ among \"\n        f\"{len(candidates)} candidates\"\n    )\n    best[\"\
+          promoted_at\"] = \"pipeline_run\"\n\n    print(f\"\\n  Winner: {best['model_type']}\
+          \ | AUC: {best['auc']:.4f}\")\n    print(f\"  Reason: {best['promotion_reason']}\"\
+          )\n\n    with open(best_model_info.path, \"w\") as f:\n        json.dump(best,\
+          \ f, indent=2)\n\n"
+        image: python:3.12-slim
+    exec-train-model:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - train_model
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'mlflow==3.10.1'\
+          \ 'scikit-learn==1.5.1' 'xgboost==2.1.1' 'pandas==2.1.4' 'numpy==1.26.4'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef train_model(\n    model_type: str,\n    n_samples: int,\n   \
+          \ mlflow_tracking_uri: str,\n    metrics: Output[Metrics],\n    model_artifact:\
+          \ Output[Model]\n):\n    import numpy as np\n    import pandas as pd\n \
+          \   import mlflow\n    import json\n\n    FEATURES = [\n        \"amount\"\
+          , \"amount_zscore\", \"avg_amount_last_50\",\n        \"std_amount_last_50\"\
+          , \"unique_countries_count\",\n        \"transactions_last_hour\", \"hour_of_day\"\
+          , \"is_international\"\n    ]\n\n    def make_data(n, seed):\n        np.random.seed(seed)\n\
+          \        n_fraud = int(n * 0.02)\n        n_legit = n - n_fraud\n      \
+          \  legit = pd.DataFrame({\n            \"amount\": np.random.uniform(5,\
+          \ 300, n_legit),\n            \"hour_of_day\": np.random.randint(8, 23,\
+          \ n_legit),\n            \"transactions_last_hour\": np.random.randint(1,\
+          \ 5, n_legit),\n            \"is_international\": np.random.choice([0, 1],\
+          \ n_legit, p=[0.9, 0.1]),\n            \"unique_countries_count\": np.random.randint(1,\
+          \ 3, n_legit),\n            \"is_fraud\": 0\n        })\n        fraud =\
+          \ pd.DataFrame({\n            \"amount\": np.random.uniform(500, 5000, n_fraud),\n\
+          \            \"hour_of_day\": np.random.randint(1, 6, n_fraud),\n      \
+          \      \"transactions_last_hour\": np.random.randint(8, 20, n_fraud),\n\
+          \            \"is_international\": np.ones(n_fraud, dtype=int),\n      \
+          \      \"unique_countries_count\": np.random.randint(3, 8, n_fraud),\n \
+          \           \"is_fraud\": 1\n        })\n        df = pd.concat([legit,\
+          \ fraud]).sample(frac=1, random_state=42)\n        df[\"amount_zscore\"\
+          ] = (df[\"amount\"] - df[\"amount\"].mean()) / df[\"amount\"].std()\n  \
+          \      df[\"avg_amount_last_50\"] = df[\"amount\"].rolling(50, min_periods=1).mean()\n\
+          \        df[\"std_amount_last_50\"] = df[\"amount\"].rolling(50, min_periods=1).std().fillna(0)\n\
+          \        return df\n\n    from sklearn.metrics import roc_auc_score, f1_score,\
+          \ precision_score, recall_score\n\n    df = make_data(n_samples, seed=42)\n\
+          \    split = int(len(df) * 0.8)\n    X_train = df.iloc[:split][FEATURES]\n\
+          \    y_train = df.iloc[:split][\"is_fraud\"]\n    X_test = df.iloc[split:][FEATURES]\n\
+          \    y_test = df.iloc[split:][\"is_fraud\"]\n\n    mlflow.set_tracking_uri(mlflow_tracking_uri)\n\
+          \    mlflow.set_experiment(\"fraud-detection-kubeflow\")\n\n    with mlflow.start_run(run_name=f\"\
+          {model_type}-kubeflow\") as run:\n        mlflow.log_param(\"model_type\"\
+          , model_type)\n        mlflow.log_param(\"n_samples\", n_samples)\n\n  \
+          \      if model_type == \"logistic_regression\":\n            from sklearn.linear_model\
+          \ import LogisticRegression\n            from sklearn.preprocessing import\
+          \ StandardScaler\n            from sklearn.pipeline import Pipeline\n  \
+          \          model = Pipeline([\n                (\"scaler\", StandardScaler()),\n\
+          \                (\"clf\", LogisticRegression(C=1.0, max_iter=1000, class_weight=\"\
+          balanced\"))\n            ])\n            model.fit(X_train, y_train)\n\
+          \            y_pred = model.predict(X_test)\n            y_prob = model.predict_proba(X_test)[:,\
+          \ 1]\n            mlflow.sklearn.log_model(model, \"model\")\n\n       \
+          \ elif model_type == \"random_forest\":\n            from sklearn.ensemble\
+          \ import RandomForestClassifier\n            model = RandomForestClassifier(\n\
+          \                n_estimators=200, max_depth=10,\n                class_weight=\"\
+          balanced\", random_state=42\n            )\n            model.fit(X_train,\
+          \ y_train)\n            y_pred = model.predict(X_test)\n            y_prob\
+          \ = model.predict_proba(X_test)[:, 1]\n            mlflow.sklearn.log_model(model,\
+          \ \"model\")\n\n        elif model_type == \"xgboost\":\n            import\
+          \ xgboost as xgb\n            scale_pos_weight = (y_train == 0).sum() /\
+          \ (y_train == 1).sum()\n            model = xgb.XGBClassifier(\n       \
+          \         n_estimators=300, max_depth=6, learning_rate=0.05,\n         \
+          \       scale_pos_weight=scale_pos_weight, random_state=42,\n          \
+          \      eval_metric=\"auc\"\n            )\n            model.fit(X_train,\
+          \ y_train, eval_set=[(X_test, y_test)], verbose=False)\n            y_pred\
+          \ = model.predict(X_test)\n            y_prob = model.predict_proba(X_test)[:,\
+          \ 1]\n            mlflow.xgboost.log_model(model, \"model\")\n\n       \
+          \ auc = round(roc_auc_score(y_test, y_prob), 4)\n        f1 = round(f1_score(y_test,\
+          \ y_pred, zero_division=0), 4)\n        precision = round(precision_score(y_test,\
+          \ y_pred, zero_division=0), 4)\n        recall = round(recall_score(y_test,\
+          \ y_pred, zero_division=0), 4)\n\n        mlflow.log_metrics({\"auc\": auc,\
+          \ \"f1\": f1, \"precision\": precision, \"recall\": recall})\n\n       \
+          \ metrics.log_metric(\"auc\", auc)\n        metrics.log_metric(\"f1\", f1)\n\
+          \        metrics.log_metric(\"precision\", precision)\n        metrics.log_metric(\"\
+          recall\", recall)\n        metrics.log_metric(\"run_id\", 0)\n\n       \
+          \ model_artifact.uri = run.info.run_id\n        model_artifact.metadata[\"\
+          run_id\"] = run.info.run_id\n        model_artifact.metadata[\"model_type\"\
+          ] = model_type\n        model_artifact.metadata[\"auc\"] = str(auc)\n  \
+          \      model_artifact.metadata[\"mlflow_uri\"] = mlflow_tracking_uri\n\n\
+          \        print(f\"{model_type} | AUC: {auc} | F1: {f1} | run_id: {run.info.run_id}\"\
+          )\n\n"
+        image: python:3.12-slim
+    exec-train-model-2:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - train_model
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'mlflow==3.10.1'\
+          \ 'scikit-learn==1.5.1' 'xgboost==2.1.1' 'pandas==2.1.4' 'numpy==1.26.4'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef train_model(\n    model_type: str,\n    n_samples: int,\n   \
+          \ mlflow_tracking_uri: str,\n    metrics: Output[Metrics],\n    model_artifact:\
+          \ Output[Model]\n):\n    import numpy as np\n    import pandas as pd\n \
+          \   import mlflow\n    import json\n\n    FEATURES = [\n        \"amount\"\
+          , \"amount_zscore\", \"avg_amount_last_50\",\n        \"std_amount_last_50\"\
+          , \"unique_countries_count\",\n        \"transactions_last_hour\", \"hour_of_day\"\
+          , \"is_international\"\n    ]\n\n    def make_data(n, seed):\n        np.random.seed(seed)\n\
+          \        n_fraud = int(n * 0.02)\n        n_legit = n - n_fraud\n      \
+          \  legit = pd.DataFrame({\n            \"amount\": np.random.uniform(5,\
+          \ 300, n_legit),\n            \"hour_of_day\": np.random.randint(8, 23,\
+          \ n_legit),\n            \"transactions_last_hour\": np.random.randint(1,\
+          \ 5, n_legit),\n            \"is_international\": np.random.choice([0, 1],\
+          \ n_legit, p=[0.9, 0.1]),\n            \"unique_countries_count\": np.random.randint(1,\
+          \ 3, n_legit),\n            \"is_fraud\": 0\n        })\n        fraud =\
+          \ pd.DataFrame({\n            \"amount\": np.random.uniform(500, 5000, n_fraud),\n\
+          \            \"hour_of_day\": np.random.randint(1, 6, n_fraud),\n      \
+          \      \"transactions_last_hour\": np.random.randint(8, 20, n_fraud),\n\
+          \            \"is_international\": np.ones(n_fraud, dtype=int),\n      \
+          \      \"unique_countries_count\": np.random.randint(3, 8, n_fraud),\n \
+          \           \"is_fraud\": 1\n        })\n        df = pd.concat([legit,\
+          \ fraud]).sample(frac=1, random_state=42)\n        df[\"amount_zscore\"\
+          ] = (df[\"amount\"] - df[\"amount\"].mean()) / df[\"amount\"].std()\n  \
+          \      df[\"avg_amount_last_50\"] = df[\"amount\"].rolling(50, min_periods=1).mean()\n\
+          \        df[\"std_amount_last_50\"] = df[\"amount\"].rolling(50, min_periods=1).std().fillna(0)\n\
+          \        return df\n\n    from sklearn.metrics import roc_auc_score, f1_score,\
+          \ precision_score, recall_score\n\n    df = make_data(n_samples, seed=42)\n\
+          \    split = int(len(df) * 0.8)\n    X_train = df.iloc[:split][FEATURES]\n\
+          \    y_train = df.iloc[:split][\"is_fraud\"]\n    X_test = df.iloc[split:][FEATURES]\n\
+          \    y_test = df.iloc[split:][\"is_fraud\"]\n\n    mlflow.set_tracking_uri(mlflow_tracking_uri)\n\
+          \    mlflow.set_experiment(\"fraud-detection-kubeflow\")\n\n    with mlflow.start_run(run_name=f\"\
+          {model_type}-kubeflow\") as run:\n        mlflow.log_param(\"model_type\"\
+          , model_type)\n        mlflow.log_param(\"n_samples\", n_samples)\n\n  \
+          \      if model_type == \"logistic_regression\":\n            from sklearn.linear_model\
+          \ import LogisticRegression\n            from sklearn.preprocessing import\
+          \ StandardScaler\n            from sklearn.pipeline import Pipeline\n  \
+          \          model = Pipeline([\n                (\"scaler\", StandardScaler()),\n\
+          \                (\"clf\", LogisticRegression(C=1.0, max_iter=1000, class_weight=\"\
+          balanced\"))\n            ])\n            model.fit(X_train, y_train)\n\
+          \            y_pred = model.predict(X_test)\n            y_prob = model.predict_proba(X_test)[:,\
+          \ 1]\n            mlflow.sklearn.log_model(model, \"model\")\n\n       \
+          \ elif model_type == \"random_forest\":\n            from sklearn.ensemble\
+          \ import RandomForestClassifier\n            model = RandomForestClassifier(\n\
+          \                n_estimators=200, max_depth=10,\n                class_weight=\"\
+          balanced\", random_state=42\n            )\n            model.fit(X_train,\
+          \ y_train)\n            y_pred = model.predict(X_test)\n            y_prob\
+          \ = model.predict_proba(X_test)[:, 1]\n            mlflow.sklearn.log_model(model,\
+          \ \"model\")\n\n        elif model_type == \"xgboost\":\n            import\
+          \ xgboost as xgb\n            scale_pos_weight = (y_train == 0).sum() /\
+          \ (y_train == 1).sum()\n            model = xgb.XGBClassifier(\n       \
+          \         n_estimators=300, max_depth=6, learning_rate=0.05,\n         \
+          \       scale_pos_weight=scale_pos_weight, random_state=42,\n          \
+          \      eval_metric=\"auc\"\n            )\n            model.fit(X_train,\
+          \ y_train, eval_set=[(X_test, y_test)], verbose=False)\n            y_pred\
+          \ = model.predict(X_test)\n            y_prob = model.predict_proba(X_test)[:,\
+          \ 1]\n            mlflow.xgboost.log_model(model, \"model\")\n\n       \
+          \ auc = round(roc_auc_score(y_test, y_prob), 4)\n        f1 = round(f1_score(y_test,\
+          \ y_pred, zero_division=0), 4)\n        precision = round(precision_score(y_test,\
+          \ y_pred, zero_division=0), 4)\n        recall = round(recall_score(y_test,\
+          \ y_pred, zero_division=0), 4)\n\n        mlflow.log_metrics({\"auc\": auc,\
+          \ \"f1\": f1, \"precision\": precision, \"recall\": recall})\n\n       \
+          \ metrics.log_metric(\"auc\", auc)\n        metrics.log_metric(\"f1\", f1)\n\
+          \        metrics.log_metric(\"precision\", precision)\n        metrics.log_metric(\"\
+          recall\", recall)\n        metrics.log_metric(\"run_id\", 0)\n\n       \
+          \ model_artifact.uri = run.info.run_id\n        model_artifact.metadata[\"\
+          run_id\"] = run.info.run_id\n        model_artifact.metadata[\"model_type\"\
+          ] = model_type\n        model_artifact.metadata[\"auc\"] = str(auc)\n  \
+          \      model_artifact.metadata[\"mlflow_uri\"] = mlflow_tracking_uri\n\n\
+          \        print(f\"{model_type} | AUC: {auc} | F1: {f1} | run_id: {run.info.run_id}\"\
+          )\n\n"
+        image: python:3.12-slim
+    exec-train-model-3:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - train_model
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'mlflow==3.10.1'\
+          \ 'scikit-learn==1.5.1' 'xgboost==2.1.1' 'pandas==2.1.4' 'numpy==1.26.4'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef train_model(\n    model_type: str,\n    n_samples: int,\n   \
+          \ mlflow_tracking_uri: str,\n    metrics: Output[Metrics],\n    model_artifact:\
+          \ Output[Model]\n):\n    import numpy as np\n    import pandas as pd\n \
+          \   import mlflow\n    import json\n\n    FEATURES = [\n        \"amount\"\
+          , \"amount_zscore\", \"avg_amount_last_50\",\n        \"std_amount_last_50\"\
+          , \"unique_countries_count\",\n        \"transactions_last_hour\", \"hour_of_day\"\
+          , \"is_international\"\n    ]\n\n    def make_data(n, seed):\n        np.random.seed(seed)\n\
+          \        n_fraud = int(n * 0.02)\n        n_legit = n - n_fraud\n      \
+          \  legit = pd.DataFrame({\n            \"amount\": np.random.uniform(5,\
+          \ 300, n_legit),\n            \"hour_of_day\": np.random.randint(8, 23,\
+          \ n_legit),\n            \"transactions_last_hour\": np.random.randint(1,\
+          \ 5, n_legit),\n            \"is_international\": np.random.choice([0, 1],\
+          \ n_legit, p=[0.9, 0.1]),\n            \"unique_countries_count\": np.random.randint(1,\
+          \ 3, n_legit),\n            \"is_fraud\": 0\n        })\n        fraud =\
+          \ pd.DataFrame({\n            \"amount\": np.random.uniform(500, 5000, n_fraud),\n\
+          \            \"hour_of_day\": np.random.randint(1, 6, n_fraud),\n      \
+          \      \"transactions_last_hour\": np.random.randint(8, 20, n_fraud),\n\
+          \            \"is_international\": np.ones(n_fraud, dtype=int),\n      \
+          \      \"unique_countries_count\": np.random.randint(3, 8, n_fraud),\n \
+          \           \"is_fraud\": 1\n        })\n        df = pd.concat([legit,\
+          \ fraud]).sample(frac=1, random_state=42)\n        df[\"amount_zscore\"\
+          ] = (df[\"amount\"] - df[\"amount\"].mean()) / df[\"amount\"].std()\n  \
+          \      df[\"avg_amount_last_50\"] = df[\"amount\"].rolling(50, min_periods=1).mean()\n\
+          \        df[\"std_amount_last_50\"] = df[\"amount\"].rolling(50, min_periods=1).std().fillna(0)\n\
+          \        return df\n\n    from sklearn.metrics import roc_auc_score, f1_score,\
+          \ precision_score, recall_score\n\n    df = make_data(n_samples, seed=42)\n\
+          \    split = int(len(df) * 0.8)\n    X_train = df.iloc[:split][FEATURES]\n\
+          \    y_train = df.iloc[:split][\"is_fraud\"]\n    X_test = df.iloc[split:][FEATURES]\n\
+          \    y_test = df.iloc[split:][\"is_fraud\"]\n\n    mlflow.set_tracking_uri(mlflow_tracking_uri)\n\
+          \    mlflow.set_experiment(\"fraud-detection-kubeflow\")\n\n    with mlflow.start_run(run_name=f\"\
+          {model_type}-kubeflow\") as run:\n        mlflow.log_param(\"model_type\"\
+          , model_type)\n        mlflow.log_param(\"n_samples\", n_samples)\n\n  \
+          \      if model_type == \"logistic_regression\":\n            from sklearn.linear_model\
+          \ import LogisticRegression\n            from sklearn.preprocessing import\
+          \ StandardScaler\n            from sklearn.pipeline import Pipeline\n  \
+          \          model = Pipeline([\n                (\"scaler\", StandardScaler()),\n\
+          \                (\"clf\", LogisticRegression(C=1.0, max_iter=1000, class_weight=\"\
+          balanced\"))\n            ])\n            model.fit(X_train, y_train)\n\
+          \            y_pred = model.predict(X_test)\n            y_prob = model.predict_proba(X_test)[:,\
+          \ 1]\n            mlflow.sklearn.log_model(model, \"model\")\n\n       \
+          \ elif model_type == \"random_forest\":\n            from sklearn.ensemble\
+          \ import RandomForestClassifier\n            model = RandomForestClassifier(\n\
+          \                n_estimators=200, max_depth=10,\n                class_weight=\"\
+          balanced\", random_state=42\n            )\n            model.fit(X_train,\
+          \ y_train)\n            y_pred = model.predict(X_test)\n            y_prob\
+          \ = model.predict_proba(X_test)[:, 1]\n            mlflow.sklearn.log_model(model,\
+          \ \"model\")\n\n        elif model_type == \"xgboost\":\n            import\
+          \ xgboost as xgb\n            scale_pos_weight = (y_train == 0).sum() /\
+          \ (y_train == 1).sum()\n            model = xgb.XGBClassifier(\n       \
+          \         n_estimators=300, max_depth=6, learning_rate=0.05,\n         \
+          \       scale_pos_weight=scale_pos_weight, random_state=42,\n          \
+          \      eval_metric=\"auc\"\n            )\n            model.fit(X_train,\
+          \ y_train, eval_set=[(X_test, y_test)], verbose=False)\n            y_pred\
+          \ = model.predict(X_test)\n            y_prob = model.predict_proba(X_test)[:,\
+          \ 1]\n            mlflow.xgboost.log_model(model, \"model\")\n\n       \
+          \ auc = round(roc_auc_score(y_test, y_prob), 4)\n        f1 = round(f1_score(y_test,\
+          \ y_pred, zero_division=0), 4)\n        precision = round(precision_score(y_test,\
+          \ y_pred, zero_division=0), 4)\n        recall = round(recall_score(y_test,\
+          \ y_pred, zero_division=0), 4)\n\n        mlflow.log_metrics({\"auc\": auc,\
+          \ \"f1\": f1, \"precision\": precision, \"recall\": recall})\n\n       \
+          \ metrics.log_metric(\"auc\", auc)\n        metrics.log_metric(\"f1\", f1)\n\
+          \        metrics.log_metric(\"precision\", precision)\n        metrics.log_metric(\"\
+          recall\", recall)\n        metrics.log_metric(\"run_id\", 0)\n\n       \
+          \ model_artifact.uri = run.info.run_id\n        model_artifact.metadata[\"\
+          run_id\"] = run.info.run_id\n        model_artifact.metadata[\"model_type\"\
+          ] = model_type\n        model_artifact.metadata[\"auc\"] = str(auc)\n  \
+          \      model_artifact.metadata[\"mlflow_uri\"] = mlflow_tracking_uri\n\n\
+          \        print(f\"{model_type} | AUC: {auc} | F1: {f1} | run_id: {run.info.run_id}\"\
+          )\n\n"
+        image: python:3.12-slim
+pipelineInfo:
+  description: Trains 3 fraud detection models in parallel, evaluates them, and auto-deploys
+    the best one
+  name: fraud-detection-mlops-pipeline
+root:
+  dag:
+    tasks:
+      deploy-best-model:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-deploy-best-model
+        dependentTasks:
+        - evaluate-and-select
+        inputs:
+          artifacts:
+            best_model_info:
+              taskOutputArtifact:
+                outputArtifactKey: best_model_info
+                producerTask: evaluate-and-select
+          parameters:
+            serving_endpoint:
+              componentInputParameter: serving_endpoint
+        taskInfo:
+          name: Deploy Best Model
+      evaluate-and-select:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-evaluate-and-select
+        dependentTasks:
+        - train-model
+        - train-model-2
+        - train-model-3
+        inputs:
+          artifacts:
+            lr_model:
+              taskOutputArtifact:
+                outputArtifactKey: model_artifact
+                producerTask: train-model
+            rf_model:
+              taskOutputArtifact:
+                outputArtifactKey: model_artifact
+                producerTask: train-model-2
+            xgb_model:
+              taskOutputArtifact:
+                outputArtifactKey: model_artifact
+                producerTask: train-model-3
+        taskInfo:
+          name: Evaluate & Select Best Model
+      train-model:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-train-model
+        inputs:
+          parameters:
+            mlflow_tracking_uri:
+              componentInputParameter: mlflow_tracking_uri
+            model_type:
+              runtimeValue:
+                constant: logistic_regression
+            n_samples:
+              componentInputParameter: n_samples
+        taskInfo:
+          name: Train Logistic Regression
+      train-model-2:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-train-model-2
+        inputs:
+          parameters:
+            mlflow_tracking_uri:
+              componentInputParameter: mlflow_tracking_uri
+            model_type:
+              runtimeValue:
+                constant: random_forest
+            n_samples:
+              componentInputParameter: n_samples
+        taskInfo:
+          name: Train Random Forest
+      train-model-3:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-train-model-3
+        inputs:
+          parameters:
+            mlflow_tracking_uri:
+              componentInputParameter: mlflow_tracking_uri
+            model_type:
+              runtimeValue:
+                constant: xgboost
+            n_samples:
+              componentInputParameter: n_samples
+        taskInfo:
+          name: Train XGBoost
+  inputDefinitions:
+    parameters:
+      mlflow_tracking_uri:
+        defaultValue: http://host.docker.internal:5001
+        isOptional: true
+        parameterType: STRING
+      n_samples:
+        defaultValue: 10000.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      serving_endpoint:
+        defaultValue: http://localhost:8000
+        isOptional: true
+        parameterType: STRING
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.16.0

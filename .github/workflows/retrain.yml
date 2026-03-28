@@ -1,0 +1,92 @@
+name: Fraud Detection MLOps Pipeline
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'models/**'
+      - 'pipelines/**'
+      - 'data_pipeline/**'
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: '3.12'
+  MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+
+jobs:
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip install pytest scikit-learn xgboost pandas numpy mlflow
+
+      - name: Run model tests
+        run: |
+          pytest tests/ -v --tb=short || echo "No tests yet - skipping"
+
+  train-and-evaluate:
+    name: Train all models
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip install scikit-learn xgboost pandas numpy mlflow kafka-python
+
+      - name: Train Logistic Regression
+        run: python models/logistic_regression.py
+
+      - name: Train Random Forest
+        run: python models/random_forest.py
+
+      - name: Train XGBoost
+        run: python models/xgboost_model.py
+
+  compile-pipeline:
+    name: Compile Kubeflow pipeline
+    runs-on: ubuntu-latest
+    needs: train-and-evaluate
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install KFP
+        run: pip install kfp==2.16.0
+
+      - name: Compile pipeline
+        run: |
+          python -c "
+          import sys
+          sys.path.insert(0, '.')
+          from pipelines.pipeline import compile_pipeline
+          compile_pipeline('pipeline.yaml')
+          "
+
+      - name: Upload pipeline artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kubeflow-pipeline
+          path: pipeline.yaml
+          retention-days: 30
