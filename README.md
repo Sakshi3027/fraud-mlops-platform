@@ -2,6 +2,40 @@
 
 A production-grade, real-time fraud detection system built with Kubeflow Pipelines, Apache Kafka, Feast feature store, and deployed on GCP GKE. Demonstrates end-to-end MLOps: from live data ingestion to automated model training, A/B testing, and self-healing deployment.
 
+![Python](https://img.shields.io/badge/Python-3.12-blue)
+![Kubeflow](https://img.shields.io/badge/Kubeflow-2.16-purple)
+![MLflow](https://img.shields.io/badge/MLflow-3.10-blue)
+![Kafka](https://img.shields.io/badge/Kafka-7.4-black)
+![Terraform](https://img.shields.io/badge/Terraform-1.14-purple)
+![Tests](https://img.shields.io/badge/Tests-26%20passing-green)
+
+## Live Demo
+
+| Service | URL |
+|---|---|
+| Prediction API | http://localhost:8000 |
+| API Docs | http://localhost:8000/docs |
+| MLflow Experiments | http://localhost:5001 |
+| Grafana Dashboard | http://localhost:3000 |
+| Prometheus | http://localhost:9090 |
+
+## Screenshots
+
+### MLflow — 3 models trained and tracked
+![MLflow Training Runs](docs/mlflow-runs.png)
+
+### FastAPI — Live prediction endpoint
+![API Swagger Docs](docs/api-docs.png)
+
+### Fraud detection in action
+![Fraud Prediction Response](docs/fraud-prediction.png)
+
+### A/B model traffic stats
+![Model Stats](docs/model-stats.png)
+
+### Grafana monitoring
+![Grafana Dashboard](docs/grafana.png)
+
 ## Architecture
 ```
 Kafka (live transactions)
@@ -10,9 +44,10 @@ Kafka (live transactions)
     → Kubeflow Pipeline (parallel training of 3 models)
         → MLflow (experiment tracking)
         → Auto-selection (best AUC wins)
-    → KServe (A/B traffic splitting: 80/15/5)
+    → FastAPI (A/B traffic splitting: 80/15/5)
     → Prometheus + Grafana (drift detection + monitoring)
-    → GitHub Actions (auto-retrain on drift or code push)
+    → GitHub Actions (auto-retrain on code push)
+    → Terraform (GKE cluster + GCS buckets on GCP)
 ```
 
 ## Tech Stack
@@ -20,7 +55,7 @@ Kafka (live transactions)
 | Layer | Technology |
 |---|---|
 | Data streaming | Apache Kafka |
-| Feature store | Feast + Redis |
+| Feature engineering | Python + Redis |
 | ML orchestration | Kubeflow Pipelines |
 | Experiment tracking | MLflow |
 | Model serving | FastAPI + KServe |
@@ -32,15 +67,21 @@ Kafka (live transactions)
 
 Three fraud detection models trained in parallel, evaluated by AUC, winner auto-promoted:
 
-- Logistic Regression v1 — baseline
-- Random Forest v2 — challenger
-- XGBoost v3 — champion (AUC: 0.976)
+| Model | Role | AUC |
+|---|---|---|
+| XGBoost v3 | Champion (80% traffic) | 1.0 |
+| Random Forest v2 | Challenger (15% traffic) | 1.0 |
+| Logistic Regression v1 | Shadow (5% traffic) | 1.0 |
+
+> Note: AUC of 1.0 reflects clearly separable synthetic data patterns. In production, real transaction data would produce AUC in the 0.92–0.97 range.
 
 ## Quick Start
 ```bash
-# Clone and start local stack
+# Clone
 git clone https://github.com/Sakshi3027/fraud-mlops-platform
 cd fraud-mlops-platform
+
+# Start all services
 docker-compose up -d
 
 # Start MLflow
@@ -48,7 +89,7 @@ mlflow server --host 0.0.0.0 --port 5001 \
   --backend-store-uri sqlite:///mlflow_data/mlflow.db \
   --default-artifact-root $(pwd)/mlflow_data/artifacts
 
-# Train all models
+# Train all 3 models
 python models/logistic_regression.py
 python models/random_forest.py
 python models/xgboost_model.py
@@ -56,24 +97,55 @@ python models/xgboost_model.py
 # Start prediction API
 python -m uvicorn serving.app:app --port 8000 --reload
 
-# Test a prediction
-curl -X POST http://localhost:8000/predict \
-  -H "Content-Type: application/json" \
-  -d '{"transaction_id":"test-001","user_id":"user_1234",
-       "amount":2500,"hour_of_day":3,"transactions_last_hour":12,
-       "is_international":1,"unique_countries_count":5,
-       "amount_zscore":3.2,"avg_amount_last_50":45.0,"std_amount_last_50":12.0}'
+# Run tests
+pytest tests/ -v
 ```
 
-## Local Services
+## Test a prediction
+```bash
+# Fraudulent transaction (high amount, 3am, international, high velocity)
+curl -X POST http://localhost:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{
+    "transaction_id": "demo-001",
+    "user_id": "user_1234",
+    "amount": 2500,
+    "hour_of_day": 3,
+    "transactions_last_hour": 12,
+    "is_international": 1,
+    "unique_countries_count": 5,
+    "amount_zscore": 3.2,
+    "avg_amount_last_50": 45.0,
+    "std_amount_last_50": 12.0
+  }'
 
-| Service | URL |
-|---|---|
-| Prediction API | http://localhost:8000 |
-| API Docs | http://localhost:8000/docs |
-| MLflow | http://localhost:5001 |
-| Grafana | http://localhost:3000 |
-| Prometheus | http://localhost:9090 |
+# Expected: {"is_fraud": true, "fraud_probability": 0.99, "model_role": "champion"}
+```
+
+## Project Structure
+```
+fraud-mlops-platform/
+├── .github/workflows/    # CI/CD — auto retrain + test on push
+├── data_pipeline/
+│   ├── producers/        # Kafka transaction producer (10 tx/sec)
+│   └── consumers/        # Feature engineering consumer
+├── feature_store/        # Feast feature definitions
+├── models/               # 3 model implementations
+├── pipelines/
+│   ├── components/       # Kubeflow components (train, evaluate, deploy)
+│   └── pipeline.py       # Main pipeline definition
+├── serving/
+│   ├── app.py            # FastAPI prediction API
+│   └── ab_router.py      # A/B traffic splitting logic
+├── monitoring/
+│   ├── prometheus/       # Scrape config + alert rules
+│   └── grafana/          # Dashboard JSON
+├── terraform/            # GKE cluster + GCS buckets
+├── tests/                # 26 passing tests
+├── docs/                 # Screenshots
+├── docker-compose.yml    # Local dev stack
+└── pipeline.yaml         # Compiled Kubeflow pipeline
+```
 
 ## Deploy to GCP
 ```bash
@@ -82,3 +154,11 @@ terraform init
 terraform plan -var="project_id=YOUR_PROJECT_ID"
 terraform apply -var="project_id=YOUR_PROJECT_ID"
 ```
+
+## CI/CD
+
+Every push to `main` automatically:
+1. Runs all 26 tests
+2. Trains all 3 models with MLflow tracking
+3. Compares models and prints winner by AUC
+4. Compiles and uploads Kubeflow pipeline artifact
