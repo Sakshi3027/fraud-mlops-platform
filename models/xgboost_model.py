@@ -1,3 +1,4 @@
+import os
 import mlflow
 import mlflow.xgboost
 import pandas as pd
@@ -49,7 +50,8 @@ def generate_training_data(n_samples: int = 10000) -> pd.DataFrame:
     return df
 
 
-def train(mlflow_tracking_uri: str = "http://localhost:5001", artifact_location: str = None) -> dict:
+def train(mlflow_tracking_uri: str = None, artifact_location: str = None) -> dict:
+    mlflow_tracking_uri = mlflow_tracking_uri or os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5001")
     mlflow.set_tracking_uri(mlflow_tracking_uri)
     mlflow.set_experiment("fraud-detection")
 
