@@ -7,13 +7,13 @@ on:
       - 'models/**'
       - 'pipelines/**'
       - 'data_pipeline/**'
+      - 'tests/**'
   schedule:
     - cron: '0 2 * * *'
   workflow_dispatch:
 
 env:
   PYTHON_VERSION: '3.12'
-  MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
 
 jobs:
   test:
@@ -29,16 +29,19 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pytest scikit-learn xgboost pandas numpy mlflow
+          pip install pytest scikit-learn xgboost pandas numpy mlflow \
+                      kafka-python fastapi prometheus-client httpx pydantic \
+                      redis kfp PyYAML
 
-      - name: Run model tests
-        run: |
-          pytest tests/ -v --tb=short || echo "No tests yet - skipping"
+      - name: Run tests
+        run: pytest tests/ -v --tb=short
 
   train-and-evaluate:
     name: Train all models
     runs-on: ubuntu-latest
     needs: test
+    env:
+      MLFLOW_TRACKING_URI: sqlite:///mlflow_ci.db
     steps:
       - uses: actions/checkout@v4
 
@@ -49,16 +52,56 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install scikit-learn xgboost pandas numpy mlflow kafka-python
+          pip install scikit-learn xgboost pandas numpy mlflow
 
       - name: Train Logistic Regression
-        run: python models/logistic_regression.py
+        run: |
+          python -c "
+          import os, sys
+          sys.path.insert(0, '.')
+          os.environ['MLFLOW_TRACKING_URI'] = 'sqlite:///mlflow_ci.db'
+          import mlflow
+          mlflow.set_tracking_uri('sqlite:///mlflow_ci.db')
+          from models.logistic_regression import train
+          result = train(mlflow_tracking_uri='sqlite:///mlflow_ci.db')
+          print('LR AUC:', result['metrics']['auc'])
+          "
 
       - name: Train Random Forest
-        run: python models/random_forest.py
+        run: |
+          python -c "
+          import os, sys
+          sys.path.insert(0, '.')
+          from models.random_forest import train
+          result = train(mlflow_tracking_uri='sqlite:///mlflow_ci.db')
+          print('RF AUC:', result['metrics']['auc'])
+          "
 
       - name: Train XGBoost
-        run: python models/xgboost_model.py
+        run: |
+          python -c "
+          import os, sys
+          sys.path.insert(0, '.')
+          from models.xgboost_model import train
+          result = train(mlflow_tracking_uri='sqlite:///mlflow_ci.db')
+          print('XGB AUC:', result['metrics']['auc'])
+          "
+
+      - name: Compare models
+        run: |
+          python -c "
+          import mlflow
+          mlflow.set_tracking_uri('sqlite:///mlflow_ci.db')
+          client = mlflow.tracking.MlflowClient()
+          exp = client.get_experiment_by_name('fraud-detection')
+          if exp:
+              runs = client.search_runs(exp.experiment_id, order_by=['metrics.auc DESC'])
+              print('--- Model Comparison ---')
+              for r in runs:
+                  print(f\"{r.data.tags.get('mlflow.runName','?'):30s} AUC: {r.data.metrics.get('auc', 0):.4f}\")
+              best = runs[0]
+              print(f\"Winner: {best.data.tags.get('mlflow.runName','?')} | AUC: {best.data.metrics.get('auc',0):.4f}\")
+          "
 
   compile-pipeline:
     name: Compile Kubeflow pipeline
@@ -82,6 +125,7 @@ jobs:
           sys.path.insert(0, '.')
           from pipelines.pipeline import compile_pipeline
           compile_pipeline('pipeline.yaml')
+          print('Pipeline compiled successfully')
           "
 
       - name: Upload pipeline artifact
