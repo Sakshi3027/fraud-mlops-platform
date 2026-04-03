@@ -1,6 +1,7 @@
 variable "project_id" {
   description = "GCP project ID"
   type        = string
+  default     = "smart-places-488923"
 }
 
 variable "region" {
@@ -24,11 +25,11 @@ variable "cluster_name" {
 variable "node_count" {
   description = "Number of nodes per zone"
   type        = number
-  default     = 2
+  default     = 1
 }
 
 variable "machine_type" {
   description = "GKE node machine type"
   type        = string
-  default     = "e2-standard-4"
+  default     = "e2-standard-2"
 }

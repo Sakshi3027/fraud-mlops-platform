@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fraud-dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fraud-dashboard
+  template:
+    metadata:
+      labels:
+        app: fraud-dashboard
+    spec:
+      containers:
+      - name: dashboard
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: dashboard-html
+          mountPath: /usr/share/nginx/html
+      volumes:
+      - name: dashboard-html
+        configMap:
+          name: dashboard-html
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard-service
+spec:
+  selector:
+    app: fraud-dashboard
+  ports:
+  - port: 80
+    targetPort: 80
+  type: LoadBalancer

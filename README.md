@@ -9,15 +9,14 @@ A production-grade, real-time fraud detection system built with Kubeflow Pipelin
 ![Terraform](https://img.shields.io/badge/Terraform-1.14-purple)
 ![Tests](https://img.shields.io/badge/Tests-26%20passing-green)
 
-## Live Demo
+## Live Demo (GCP — always on)
 
-| Service | URL |
+| Service | Live URL |
 |---|---|
-| Prediction API | http://localhost:8000 |
-| API Docs | http://localhost:8000/docs |
-| MLflow Experiments | http://localhost:5001 |
-| Grafana Dashboard | http://localhost:3000 |
-| Prometheus | http://localhost:9090 |
+| Live Dashboard | http://34.63.215.192 |
+| Prediction API | http://136.113.53.8 |
+| API Docs | http://136.113.53.8/docs |
+| Health Check | http://136.113.53.8/health |
 
 ## Screenshots
 
@@ -104,7 +103,7 @@ pytest tests/ -v
 ## Test a prediction
 ```bash
 # Fraudulent transaction (high amount, 3am, international, high velocity)
-curl -X POST http://localhost:8000/predict \
+curl -X POST http://136.113.53.8/predict \
   -H "Content-Type: application/json" \
   -d '{
     "transaction_id": "demo-001",
