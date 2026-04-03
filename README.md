@@ -20,6 +20,9 @@ A production-grade, real-time fraud detection system built with Kubeflow Pipelin
 
 ## Screenshots
 
+## Live Dashboard
+![Fraud MLOps Live Dashboard](docs/dashboard-live.png)
+
 ### MLflow — 3 models trained and tracked
 ![MLflow Training Runs](docs/mlflow-runs.png)
 
