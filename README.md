@@ -8,6 +8,7 @@ A production-grade, real-time fraud detection system built with Kubeflow Pipelin
 ![Kafka](https://img.shields.io/badge/Kafka-7.4-black)
 ![Terraform](https://img.shields.io/badge/Terraform-1.14-purple)
 ![Tests](https://img.shields.io/badge/Tests-26%20passing-green)
+[![Medium](https://img.shields.io/badge/Medium-Read%20the%20Writeup-black?logo=medium)](https://medium.com/@SakshiChavan/i-built-a-production-mlops-platform-from-scratch-kubeflow-kafka-terraform-and-live-on-gcp-708aa3ac9a40)
 
 ## Live Demo (GCP — always on)
 
@@ -17,6 +18,14 @@ A production-grade, real-time fraud detection system built with Kubeflow Pipelin
 | Prediction API | http://136.113.53.8 |
 | API Docs | http://136.113.53.8/docs |
 | Health Check | http://136.113.53.8/health |
+
+## Blog Post
+
+Read the full technical writeup on Medium — covering architecture decisions, 
+lessons learned, and how each component was built and deployed:
+
+**[I built a production MLOps platform from scratch — Kubeflow, Kafka, Terraform, and Live on GCP](https://medium.com/@SakshiChavan/i-built-a-production-mlops-platform-from-scratch-kubeflow-kafka-terraform-and-live-on-gcp-708aa3ac9a40)**
+
 
 ## Screenshots
 
